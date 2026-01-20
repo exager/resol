@@ -2,7 +2,9 @@ import logging
 import json
 from datetime import datetime
 from app.core.config import settings
+from contextvars import ContextVar
 
+request_id_ctx = ContextVar("request_id", default=None)
 
 class JsonFormatter(logging.Formatter):
     def format(self, record):
@@ -12,7 +14,8 @@ class JsonFormatter(logging.Formatter):
             "message": record.getMessage(),
         }
 
-        if hasattr(record, "request_id"):
+        request_id = getattr(record, "request_id", None) or request_id_ctx.get()
+        if request_id:
             payload["request_id"] = record.request_id
 
         return json.dumps(payload)
