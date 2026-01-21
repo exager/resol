@@ -1,7 +1,8 @@
 import logging
 from fastapi import APIRouter, HTTPException, Request
-
 from app.schemas.ingest import IngestRequest, IngestResponse
+from app.core.retry import retry
+from app.core.limits import enforce_size_limit
 from app.core.search.dummy_internet import DummyInternetSearchProvider
 
 router = APIRouter()
@@ -11,7 +12,8 @@ search_provider = DummyInternetSearchProvider()
 
 
 @router.post("/ingest", response_model=IngestResponse)
-def ingest(req: IngestRequest, request: Request):
+async def ingest(req: IngestRequest, request: Request):
+    await enforce_size_limit(request)
     request_id = request.state.request_id
 
     discovered_docs = 0
@@ -23,7 +25,10 @@ def ingest(req: IngestRequest, request: Request):
                 detail="search_query is required when source=internet"
             )
 
-        results = search_provider.search(req.search_query)
+        results = retry(
+            lambda:search_provider.search(req.search_query),
+            retries = 3,
+        )
         discovered_docs = len(results)
 
         logger.info(

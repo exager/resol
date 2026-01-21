@@ -16,7 +16,7 @@ class JsonFormatter(logging.Formatter):
 
         request_id = getattr(record, "request_id", None) or request_id_ctx.get()
         if request_id:
-            payload["request_id"] = record.request_id
+            payload["request_id"] = request_id
 
         return json.dumps(payload)
 
