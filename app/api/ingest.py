@@ -9,12 +9,19 @@ import hashlib
 from typing import List
 from app.core.documents.models import Document
 from app.core.documents.chunker import chunk_document
+from fastapi import UploadFile, File
+from app.core.loaders.pdf_loader import PDFLoader
+from app.core.loaders.docx_loader import DocxLoader
+from app.core.loaders.quality import validate_extraction
+from app.core.storage.chunk_store import InMemoryChunkStore
+
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
 
 search_provider = DummyInternetSearchProvider()
 
+chunk_store = InMemoryChunkStore()
 
 @router.post("/ingest", response_model=IngestResponse)
 async def ingest(req: IngestRequest, request: Request):
@@ -37,7 +44,7 @@ async def ingest(req: IngestRequest, request: Request):
         # discovered_docs = len(results)
         for result in results:
             # Stable ID derived from source URL
-            source_doc_id = hashlib.sha256(result.url.encode()).hexdigest()
+            source_doc_id = hashlib.sha256(f'url:{result.url.encode()}'.encode("utf-8")).hexdigest()
 
             documents.append(
                 Document(
@@ -66,7 +73,7 @@ async def ingest(req: IngestRequest, request: Request):
                 detail="content is required when source=local"
             )
 
-        local_doc_id = str(uuid.uuid4())
+        local_doc_id = hashlib.sha256(f'local:{req.content}'.encode("utf-8")).hexdigest()
         documents.append(
             Document(
                 document_id=local_doc_id,
@@ -87,9 +94,7 @@ async def ingest(req: IngestRequest, request: Request):
     else:
         raise HTTPException(status_code=400, detail="invalid source")
 
-    # Chunking docs
     chunks = []
-
     for document in documents:
         parts = chunk_document(document)
         chunks.extend(parts)
@@ -105,9 +110,78 @@ async def ingest(req: IngestRequest, request: Request):
         },
     )
 
+    chunk_store.bulk_upsert(chunks)
+    logger.info(
+        "chunks_stored",
+        extra={
+            "request_id": request_id,
+            "stored_chunk_count": len(chunks),
+            "total_chunks_in_store": chunk_store.count(),
+        },
+    )
+    print(chunk_store.count())
     return IngestResponse(
         document_id="batch",
         status="accepted",
         discovered_docs=len(documents),
     )
 
+@router.post("/ingest/file", response_model=IngestResponse)
+async def ingest_file(
+    request: Request = None,
+    file: UploadFile = File(...),
+):
+    request_id = request.state.request_id
+
+    pdf_loader = PDFLoader()
+    docx_loader = DocxLoader()
+    file_bytes = await file.read()
+
+    if file.filename.endswith(".pdf"):
+        text, meta = pdf_loader.load(file_bytes)
+    elif file.filename.endswith(".docx"):
+        text, meta = docx_loader.load(file_bytes)
+    else:
+        raise HTTPException(status_code=400, detail="unsupported_file_type")
+
+    try:
+        validate_extraction(text)
+    except ValueError:
+        logger.warning(
+            "document_extraction_refused",
+            extra={
+                "request_id": request_id,
+                "filename": file.filename,
+                "extracted_length": meta["extracted_length"],
+            },
+        )
+        raise HTTPException(status_code=422, detail="low_quality_document")
+
+    document_id = str(uuid.uuid4())
+
+    document = Document(
+        document_id=document_id,
+        content=text,
+        metadata={
+            "source": "file",
+            "filename": file.filename,
+            **meta,
+        },
+    )
+
+    chunks = chunk_document(document)
+
+    logger.info(
+        "file_document_ingested",
+        extra={
+            "request_id": request_id,
+            "document_id": document_id,
+            "chunk_count": len(chunks),
+        },
+    )
+
+    return IngestResponse(
+        document_id=document_id,
+        status="accepted",
+        discovered_docs=1,
+    )
