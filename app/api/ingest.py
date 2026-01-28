@@ -6,6 +6,8 @@ from app.core.limits import enforce_size_limit
 from app.core.search.dummy_internet import DummyInternetSearchProvider
 import uuid
 import hashlib
+import json
+import numpy as np
 from typing import List
 from app.core.documents.models import Document
 from app.core.documents.chunker import chunk_document
@@ -13,15 +15,15 @@ from fastapi import UploadFile, File
 from app.core.loaders.pdf_loader import PDFLoader
 from app.core.loaders.docx_loader import DocxLoader
 from app.core.loaders.quality import validate_extraction
-from app.core.storage.chunk_store import InMemoryChunkStore
+from app.core.state import state
+from app.core.storage.vector_index import InMemoryVectorIndex
+from app.core.process import process_document
 
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
 
 search_provider = DummyInternetSearchProvider()
-
-chunk_store = InMemoryChunkStore()
 
 @router.post("/ingest", response_model=IngestResponse)
 async def ingest(req: IngestRequest, request: Request):
@@ -62,7 +64,6 @@ async def ingest(req: IngestRequest, request: Request):
             extra={
                 "request_id": request_id,
                 "query": req.search_query,
-                "documents_found": discovered_docs,
             }
         )
 
@@ -94,32 +95,9 @@ async def ingest(req: IngestRequest, request: Request):
     else:
         raise HTTPException(status_code=400, detail="invalid source")
 
-    chunks = []
-    for document in documents:
-        parts = chunk_document(document)
-        chunks.extend(parts)
-
-    # Vectorization and Persistence 
-
-    logger.info(
-        "document_chunked",
-        extra={
-            "request_id": request_id,
-            "document_id": document.document_id,
-            "chunk_count": len(chunks),
-        },
-    )
-
-    chunk_store.bulk_upsert(chunks)
-    logger.info(
-        "chunks_stored",
-        extra={
-            "request_id": request_id,
-            "stored_chunk_count": len(chunks),
-            "total_chunks_in_store": chunk_store.count(),
-        },
-    )
-    print(chunk_store.count())
+    #Process Documents
+    processed_count = process_document(documents, request_id)
+    print(state.chunk_store.count())
     return IngestResponse(
         document_id="batch",
         status="accepted",
@@ -169,14 +147,14 @@ async def ingest_file(
         },
     )
 
-    chunks = chunk_document(document)
+    processed_docs = process_document([document], request_id)
 
     logger.info(
         "file_document_ingested",
         extra={
             "request_id": request_id,
             "document_id": document_id,
-            "chunk_count": len(chunks),
+            "chunk_count": processed_docs,
         },
     )
 
