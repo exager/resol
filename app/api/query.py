@@ -1,6 +1,7 @@
 from fastapi import APIRouter, HTTPException, Request
 from app.core.embeddings.embedder import Embedder
 from app.core.state import state
+from app.core.retrieval.decisions import RetrievalDecision
 import numpy as np
 import logging
 
@@ -16,24 +17,39 @@ async def query(payload: dict, request: Request):
         raise HTTPException(status_code=400, detail="query_required")
 
     if state.vector_index is None:
-        raise HTTPException(status_code=400, detail="no_documents_indexed")
+        return {
+            "decision": RetrievalDecision.REFUSE_EMPTY,
+            "reason": "no_documents_indexed",
+        }
 
     query_embedding = state.embedder.embed_texts([query_text])
+    top_k = payload.get("top_k")
+    if not top_k:
+        top_k = 5
 
     results = state.vector_index.search(
         query_embedding=query_embedding,
-        top_k=5,
+        top_k=top_k,
     )
 
+    decision, details = state.retrieval_evaluator.evaluate(results)
+
     logger.info(
-        "retrieval_performed",
+        "retrieval_evaluated",
         extra={
             "request_id": request_id,
-            "top_k": 5,
-            "results_found": len(results),
-            "scores": [score for _, score in results],
+            "decision": decision,
+            **details,
         },
     )
+
+    if decision != RetrievalDecision.ANSWERABLE:
+        return {
+            "query": query_text,
+            "decision": decision,
+            "details": details,
+            "retrieved_chunks": [],
+        }
 
     retrieved_chunks = [
         {
@@ -47,5 +63,7 @@ async def query(payload: dict, request: Request):
 
     return {
         "query": query_text,
+        "decision": decision,
+        "details": details,
         "retrieved_chunks": retrieved_chunks,
     }
