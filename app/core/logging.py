@@ -1,7 +1,7 @@
 import logging
 import json
 from datetime import datetime
-from app.core.config import settings
+from app.core.state import state
 from contextvars import ContextVar
 
 request_id_ctx = ContextVar("request_id", default=None)
@@ -18,6 +18,20 @@ class JsonFormatter(logging.Formatter):
         if request_id:
             payload["request_id"] = request_id
 
+         # Include all structured extras
+        for key, value in record.__dict__.items():
+            if key.startswith("_"):
+                continue
+            if key in (
+                "name", "msg", "args", "levelname", "levelno",
+                "pathname", "filename", "module", "exc_info",
+                "exc_text", "stack_info", "lineno", "funcName",
+                "created", "msecs", "relativeCreated", "thread",
+                "threadName", "processName", "process", "taskName",
+            ):
+                continue
+            if key not in payload:
+                payload[key] = value
         return json.dumps(payload)
 
 
@@ -26,5 +40,5 @@ def setup_logging():
     handler.setFormatter(JsonFormatter())
 
     root = logging.getLogger()
-    root.setLevel(settings.log_level)
+    root.setLevel(state.settings.log_level)
     root.handlers = [handler]

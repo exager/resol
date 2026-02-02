@@ -1,7 +1,7 @@
 import time
 from collections import defaultdict
 from threading import Lock
-
+from collections import Counter
 
 class MetricsStore:
     def __init__(self):
@@ -36,5 +36,12 @@ class MetricsStore:
                 "p95_latency_ms": percentile(0.95),
             }
 
+class RetrievalMetrics:
+    def __init__(self):
+        self.decisions = Counter()
 
-metrics_store = MetricsStore()
+    def record(self, decision: str):
+        self.decisions[decision] += 1
+
+    def snapshot(self):
+        return dict(self.decisions)

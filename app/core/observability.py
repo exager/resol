@@ -1,7 +1,7 @@
 import time
 import logging
 from fastapi import Request
-from app.core.metrics import metrics_store
+from app.core.state import state
 
 logger = logging.getLogger(__name__)
 
@@ -19,7 +19,7 @@ async def observability_middleware(request: Request, call_next):
         latency_ms = (time.perf_counter() - start_time) * 1000
         is_error = status_code >= 400
 
-        metrics_store.record(latency_ms, is_error)
+        state.metrics_store.record(latency_ms, is_error)
 
         logger.info(
             "request_completed",

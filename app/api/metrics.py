@@ -1,9 +1,9 @@
 from fastapi import APIRouter
-from app.core.metrics import metrics_store
+from app.core.state import state
 
 router = APIRouter()
 
 
 @router.get("/metrics")
 def metrics():
-    return metrics_store.snapshot()
+    return state.metrics_store.snapshot()

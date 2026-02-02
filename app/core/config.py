@@ -8,5 +8,10 @@ class Settings(BaseSettings):
     class Config:
         env_file = ".env"
 
+class RetrievalConfig(BaseSettings):
+    min_top_score: float = 0.6
+    min_chunks_above_threshold: int = 1
 
-settings = Settings()
+    class Config:
+        env_prefix = "RAG_"
+

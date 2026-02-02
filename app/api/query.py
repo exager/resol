@@ -17,6 +17,17 @@ async def query(payload: dict, request: Request):
         raise HTTPException(status_code=400, detail="query_required")
 
     if state.vector_index is None:
+        state.retrieval_metrics.record(RetrievalDecision.REFUSE_EMPTY.value)
+        logger.info(
+            "retrieval_decision",
+            extra={
+                "request_id": request_id,
+                "decision": decision,
+                "metrics_snapshot": state.retrieval_metrics.snapshot(),
+                **details,
+            },
+        )
+
         return {
             "decision": RetrievalDecision.REFUSE_EMPTY,
             "reason": "no_documents_indexed",
@@ -33,12 +44,14 @@ async def query(payload: dict, request: Request):
     )
 
     decision, details = state.retrieval_evaluator.evaluate(results)
+    state.retrieval_metrics.record(decision.value)
 
     logger.info(
-        "retrieval_evaluated",
+        "retrieval_decision",
         extra={
             "request_id": request_id,
-            "decision": decision,
+            "decision": decision.value,
+            "metrics_snapshot": state.retrieval_metrics.snapshot(),
             **details,
         },
     )
@@ -46,7 +59,7 @@ async def query(payload: dict, request: Request):
     if decision != RetrievalDecision.ANSWERABLE:
         return {
             "query": query_text,
-            "decision": decision,
+            "decision": decision.value,
             "details": details,
             "retrieved_chunks": [],
         }
